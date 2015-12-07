@@ -71,11 +71,12 @@ class Win32Freeze(Command, WixMixIn):
         self.opts = opts
         self.src_root = self.d(self.SRC)
         self.base = self.j(self.d(self.SRC), 'build', 'winfrozen')
+        self.app_base = self.j(self.base, 'app')
         self.rc_template = self.j(self.d(self.a(__file__)), 'template.rc')
         self.py_ver = ''.join(map(str, sys.version_info[:2]))
-        self.lib_dir = self.j(self.base, 'Lib')
-        self.pylib = self.j(self.base, 'pylib.zip')
-        self.dll_dir = self.j(self.base, 'DLLs')
+        self.lib_dir = self.j(self.app_base, 'Lib')
+        self.pylib = self.j(self.app_base, 'pylib.zip')
+        self.dll_dir = self.j(self.app_base, 'DLLs')
         self.portable_base = self.j(self.d(self.base), 'Calibre Portable')
         self.obj_dir = self.j(self.src_root, 'build', 'launcher')
 
@@ -95,7 +96,8 @@ class Win32Freeze(Command, WixMixIn):
     def initbase(self):
         if self.e(self.base):
             shutil.rmtree(self.base)
-        os.makedirs(self.base)
+        os.makedirs(self.app_base)
+        os.mkdir(self.dll_dir)
 
     def add_plugins(self):
         self.info('Adding plugins...')
@@ -111,14 +113,14 @@ class Win32Freeze(Command, WixMixIn):
         # shutil.copytree(CRT, self.j(self.base, os.path.basename(CRT)))
 
         self.info('Adding resources...')
-        tgt = self.j(self.base, 'resources')
+        tgt = self.j(self.app_base, 'resources')
         if os.path.exists(tgt):
             shutil.rmtree(tgt)
         shutil.copytree(self.j(self.src_root, 'resources'), tgt)
 
         self.info('Adding Qt...')
-        shutil.copytree(os.path.join(self.python_base, 'DLLs') , self.dll_dir,
-                ignore=shutil.ignore_patterns('msvc*.dll', 'Microsoft.*'))
+        for x in glob.glob(os.path.join(self.python_base, 'DLLs', '*')):
+            shutil.copy2(x, self.dll_dir)
         for x in glob.glob(self.j(OPENSSL_DIR, 'bin', '*.dll')):
             shutil.copy2(x, self.dll_dir)
         for x in glob.glob(self.j(ICU_DIR, 'source', 'lib', '*.dll')):
@@ -207,7 +209,7 @@ class Win32Freeze(Command, WixMixIn):
         self.info('\nAdding Qt plugins...')
         qt_prefix = QT_DIR
         plugdir = self.j(qt_prefix, 'plugins')
-        tdir = self.j(self.base, 'qt_plugins')
+        tdir = self.j(self.app_base, 'qt_plugins')
         for d in QT_PLUGINS:
             self.info('\t', d)
             imfd = os.path.join(plugdir, d)
@@ -226,7 +228,7 @@ class Win32Freeze(Command, WixMixIn):
         self.info('\tAdding misc binary deps')
         bindir = os.path.join(SW, 'bin')
         for x in ('pdftohtml', 'pdfinfo', 'pdftoppm', 'jpegtran-calibre', 'cjpeg-calibre', 'optipng-calibre'):
-            shutil.copy2(os.path.join(bindir, x+'.exe'), self.base)
+            shutil.copy2(os.path.join(bindir, x+'.exe'), self.dll_dir)
         for pat in ('*.dll',):
             for f in glob.glob(os.path.join(bindir, pat)):
                 ok = True
@@ -556,7 +558,7 @@ class Win32Freeze(Command, WixMixIn):
         if self.newer(obj, src):
             cmd = [msvc.cc] + cflags + ['/Fo'+obj, '/Tc'+src]
             self.run_builder(cmd, show_output=True)
-        exe = self.j(self.base, 'calibre-eject.exe')
+        exe = self.j(self.dll_dir, 'calibre-eject.exe')
         cmd = [msvc.linker] + ['/MACHINE:'+machine,
                 '/SUBSYSTEM:CONSOLE', '/RELEASE',
                 '/OUT:'+exe] + [self.embed_resources(exe), obj, 'setupapi.lib']
@@ -569,14 +571,13 @@ class Win32Freeze(Command, WixMixIn):
         dlflags = (['/DEBUG'] if debug else ['/INCREMENTAL:NO'])
         base = self.j(self.src_root, 'setup', 'installer', 'windows')
         sources = [self.j(base, x) for x in ['util.c',]]
-        headers = [self.j(base, x) for x in ['util.h',]]
         objects = [self.j(self.obj_dir, self.b(x)+'.obj') for x in sources]
-        cflags  = '/c /EHsc /MD /W3 /Ox /nologo /D_UNICODE'.split()
+        cflags  = '/c /EHsc /W3 /Ox /nologo /D_UNICODE'.split()
         cflags += ['/DPYDLL="python%s.dll"'%self.py_ver, '/I%s/include'%self.python_base]
         for src, obj in zip(sources, objects):
-            if not self.newer(obj, headers+[src]):
+            if not self.newer(obj, [src]):
                 continue
-            cmd = [msvc.cc] + cflags + dflags + ['/Fo'+obj, '/Tc'+src]
+            cmd = [msvc.cc] + cflags + dflags + ['/MD', '/Fo'+obj, '/Tc'+src]
             self.run_builder(cmd, show_output=True)
 
         dll = self.j(self.obj_dir, 'calibre-launcher.dll')
@@ -586,37 +587,39 @@ class Win32Freeze(Command, WixMixIn):
                    '/nologo', '/MACHINE:'+machine] + dlflags + objects + \
                 [self.embed_resources(dll),
                 '/LIBPATH:%s/libs'%self.python_base,
+                'delayimp.lib', 'user32.lib', 'shell32.lib',
                 'python%s.lib'%self.py_ver,
                 '/delayload:python%s.dll'%self.py_ver]
             self.info('Linking calibre-launcher.dll')
             self.run_builder(cmd, show_output=True)
 
         src = self.j(base, 'main.c')
-        shutil.copy2(dll, self.base)
+        shutil.copy2(dll, self.dll_dir)
         for typ in ('console', 'gui', ):
             self.info('Processing %s launchers'%typ)
             subsys = 'WINDOWS' if typ == 'gui' else 'CONSOLE'
             for mod, bname, func in zip(modules[typ], basenames[typ],
                     functions[typ]):
-                xflags = list(cflags)
+                xflags = list(cflags) + ['/MT']
                 if typ == 'gui':
                     xflags += ['/DGUI_APP=']
 
                 xflags += ['/DMODULE="%s"'%mod, '/DBASENAME="%s"'%bname,
                     '/DFUNCTION="%s"'%func]
                 dest = self.j(self.obj_dir, bname+'.obj')
-                if self.newer(dest, [src]+headers):
+                if self.newer(dest, [src]):
                     self.info('Compiling', bname)
                     cmd = [msvc.cc] + xflags + dflags + ['/Tc'+src, '/Fo'+dest]
                     self.run_builder(cmd)
                 exe = self.j(self.base, bname+'.exe')
                 lib = dll.replace('.dll', '.lib')
+                u32 = ['user32.lib'] if typ == 'gui' else []
                 if self.newer(exe, [dest, lib, self.rc_template, __file__]):
                     self.info('Linking', bname)
                     cmd = [msvc.linker] + ['/MACHINE:'+machine,
                             '/LIBPATH:'+self.obj_dir, '/SUBSYSTEM:'+subsys,
                             '/LIBPATH:%s/libs'%self.python_base, '/RELEASE',
-                            '/OUT:'+exe] + dlflags + [self.embed_resources(exe),
+                            '/OUT:'+exe] + u32 + dlflags + [self.embed_resources(exe),
                             dest, lib]
                     self.run_builder(cmd)
 
