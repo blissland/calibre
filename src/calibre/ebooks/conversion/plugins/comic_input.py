@@ -178,7 +178,8 @@ class ComicInput(InputFormatPlugin):
             if not os.path.exists(cdir):
                 os.makedirs(cdir)
             pages = self.get_pages(fname, cdir)
-            if not pages: continue
+            if not pages:
+                continue
             wrappers = self.create_wrappers(pages)
             comics.append((title, pages, wrappers))
 
@@ -191,7 +192,8 @@ class ComicInput(InputFormatPlugin):
         entries = []
 
         def href(x):
-            if len(comics) == 1: return os.path.basename(x)
+            if len(comics) == 1:
+                return os.path.basename(x)
             return '/'.join(x.split(os.sep)[-2:])
 
         for comic in comics:
@@ -258,4 +260,3 @@ class ComicInput(InputFormatPlugin):
                 f.write(wrapper.encode('utf-8'))
             wrappers.append(page)
         return wrappers
-
