@@ -55,7 +55,7 @@ class Guardian(BasicNewsRecipe):
             img['srcset'] = ''
         return soup
 
-    def parse_section(self, url, title_prefix=''):
+    def parse_section(self, url, title_prefix='', only_first=False):
         feeds = []
         soup = self.index_to_soup(url)
         for section in soup.findAll('section'):
@@ -69,9 +69,29 @@ class Guardian(BasicNewsRecipe):
                     self.log(' ', title, url)
                     feeds[-1][1].append({'title':title, 'url':url})
                     break
+            if only_first:
+                break
+	  
         return feeds
+
+    def remove_section(self, feeds, title):
+        for f in feeds:
+          if f[0] == title:
+            feeds.remove(f)
+            break
 
     def parse_index(self):
         feeds = self.parse_section(self.base_url)
         feeds += self.parse_section('http://www.theguardian.com/uk/sport', 'Sport - ')
+        if date.today().weekday() == 5:
+            feeds += self.parse_section('http://www.theguardian.com/theguardian/guardianreview', 'Saturday review', True)
+            feeds += self.parse_section('http://www.theguardian.com/lifeandstyle/family', 'Family', True)
+            feeds += self.parse_section('http://www.theguardian.com/theguardian/weekend', 'Weekend', True)
+        elif date.today().weekday() == 6:
+            feeds += self.parse_section('http://www.theguardian.com/theobserver/new-review', 'The new review', True)
+            self.remove_section(feeds, 'Cash')
+            feeds += self.parse_section('http://www.theguardian.com/theobserver/news/cash', 'Cash', True)
+            feeds += self.parse_section('http://www.theguardian.com/theobserver/magazine', 'Observer magazine', True)
+        else:
+            feeds += self.parse_section('http://www.theguardian.com/theguardian/g2', 'G2', True)
         return feeds
